@@ -1,9 +1,13 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Hands, HAND_CONNECTIONS } from '@mediapipe/hands';
 import * as cam from '@mediapipe/camera_utils';
 import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
+import WhiteBoard from './WhiteBoard';
 
 function HandTracker() {
+    // Declare state to store hand data
+    const [handData, setHandData] = useState(null);
+
     useEffect(() => {
         let camera = null;
 
@@ -52,6 +56,9 @@ function HandTracker() {
                         }
                     }
                     canvasCtx.restore();
+
+                    // Update handData for the Whiteboard component
+                    setHandData(results);
                 });
 
                 // Set up hand detection options
@@ -96,33 +103,38 @@ function HandTracker() {
     }, []);
 
     return (
-        <div style={{ position: 'relative', width: '640px', height: '480px' }}>
-            <video 
-                className="input_video" 
-                width="640"
-                height="480"
-                autoPlay 
-                playsInline
-                style={{
-                    width: '100%',
-                    height: '100%',
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                }}
-            />
-            <canvas 
-                className="output_canvas" 
-                width="640" 
-                height="480"
-                style={{
-                    width: '100%',
-                    height: '100%',
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                }}
-            />
+        <div>
+            <div style={{ position: 'relative', width: '640px', height: '480px' }}>
+                <video 
+                    className="input_video" 
+                    width="640"
+                    height="480"
+                    autoPlay 
+                    playsInline
+                    style={{
+                        width: '100%',
+                        height: '100%',
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                    }}
+                />
+                <canvas 
+                    className="output_canvas" 
+                    width="640" 
+                    height="480"
+                    style={{
+                        width: '100%',
+                        height: '100%',
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                    }}
+                />
+            </div>
+
+            {/* Pass handData to the WhiteBoard component */}
+            <WhiteBoard handData = {handData} />
         </div>
     );
 }
