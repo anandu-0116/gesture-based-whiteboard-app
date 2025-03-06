@@ -5,64 +5,31 @@ import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
 import WhiteBoard from './WhiteBoard';
 
 function HandTracker() {
-    // Declare state to store hand data
     const [handData, setHandData] = useState(null);
 
     useEffect(() => {
         let camera = null;
-
         const initialize = async () => {
             try {
-                // Get video element first
                 const videoElement = document.querySelector('.input_video');
                 if (!videoElement) return;
 
-                // Request camera permission first
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: true
-                });
-
-                // Set the stream to video element
+                // Request camera permission and set up video
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
                 videoElement.srcObject = stream;
-
-                // Wait for video to be ready
                 await new Promise((resolve) => {
-                    videoElement.onloadedmetadata = () => {
-                        resolve();
-                    };
+                    videoElement.onloadedmetadata = () => resolve();
                 });
 
-                // Create an instance of MediaPipe Hands
+                // Initialize hands with specific CDN version
                 const hands = new Hands({
-                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}`
-                });
-
-                // Set the onResults callback for when hands are detected
-                hands.onResults((results) => {
-                    const canvasElement = document.querySelector('.output_canvas');
-                    if (!canvasElement) return;
-
-                    const canvasCtx = canvasElement.getContext('2d');
-                    canvasCtx.save();
-                    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-                    canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-
-                    if (results.multiHandLandmarks) {
-                        for (const landmarks of results.multiHandLandmarks) {
-                            drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, 
-                                {color: '#00FF00', lineWidth: 5});
-                            drawLandmarks(canvasCtx, landmarks, 
-                                {color: '#FF0000', lineWidth: 2});
-                        }
+                    locateFile: (file) => {
+                        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}`;
                     }
-                    canvasCtx.restore();
-
-                    // Update handData for the Whiteboard component
-                    setHandData(results);
                 });
 
-                // Set up hand detection options
-                hands.setOptions({
+                // Configure hands before camera setup
+                await hands.setOptions({
                     selfieMode: true,
                     maxNumHands: 2,
                     modelComplexity: 1,
@@ -70,34 +37,70 @@ function HandTracker() {
                     minTrackingConfidence: 0.5
                 });
 
-                // Create and start the camera
+                // Set up results handler
+                hands.onResults((results) => {
+                    const canvasElement = document.querySelector('.output_canvas');
+                    if (!canvasElement) return;
+
+                    const canvasCtx = canvasElement.getContext('2d');
+                    canvasCtx.save();
+                    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+                    canvasCtx.drawImage(
+                        results.image,
+                        0,
+                        0,
+                        canvasElement.width,
+                        canvasElement.height
+                    );
+
+                    if (results.multiHandLandmarks) {
+                        for (const landmarks of results.multiHandLandmarks) {
+                            drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {
+                                color: '#00FF00',
+                                lineWidth: 5
+                            });
+                            drawLandmarks(canvasCtx, landmarks, {
+                                color: '#FF0000',
+                                lineWidth: 2
+                            });
+                        }
+                    }
+                    canvasCtx.restore();
+                    setHandData(results);
+                });
+
+                // Initialize camera with error handling
                 camera = new cam.Camera(videoElement, {
                     onFrame: async () => {
-                        await hands.send({ image: videoElement });
+                        try {
+                            await hands.send({ image: videoElement });
+                        } catch (err) {
+                            console.error('Hand detection error:', err);
+                        }
                     },
                     width: 640,
                     height: 480
                 });
 
-                camera.start();
+                await camera.start();
                 console.log('Camera started successfully');
 
             } catch (error) {
-                console.error('Error during initialization:', error);
+                console.error('Initialization error:', error);
             }
         };
 
+        // Start initialization
         initialize();
 
-        // Clean up when component is unmounted
+        // Cleanup function
         return () => {
             if (camera) {
                 camera.stop();
             }
             const videoElement = document.querySelector('.input_video');
-            if (videoElement && videoElement.srcObject) {
-                const tracks = videoElement.srcObject.getTracks();
-                tracks.forEach(track => track.stop());
+            if (videoElement?.srcObject) {
+                videoElement.srcObject.getTracks().forEach(track => track.stop());
             }
         };
     }, []);
@@ -117,6 +120,7 @@ function HandTracker() {
                         position: 'absolute',
                         top: 0,
                         left: 0,
+                        transform: 'scaleX(-1)' // Mirror the video
                     }}
                 />
                 <canvas 
@@ -129,12 +133,11 @@ function HandTracker() {
                         position: 'absolute',
                         top: 0,
                         left: 0,
+                        transform: 'scaleX(-1)' // Mirror the canvas
                     }}
                 />
             </div>
-
-            {/* Pass handData to the WhiteBoard component */}
-            <WhiteBoard handData = {handData} />
+            <WhiteBoard handData={handData} />
         </div>
     );
 }

@@ -1,12 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-function WhiteBoard({ handData }) {
+import { 
+    ref, 
+    onValue, 
+    update, 
+    push,
+    serverTimestamp
+  } from 'firebase/database';
+import { db } from '../firebase';
+
+function WhiteBoard({ handData, roomCode, userId }) {
     const canvasRef = useRef(null);
     const pointerCanvasRef = useRef(null);
     const [color, setColor] = useState('#000000');
     const [lineWidth, setLineWidth] = useState(5);
     const [lastPosition, setLastPosition] = useState(null);
     const [isDrawing, setIsDrawing] = useState(false);
+    const [participants, setParticipants] = useState({});
     
     // Initialize canvases
     useEffect(() => {
@@ -22,6 +32,66 @@ function WhiteBoard({ handData }) {
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
     }, []);
+
+    // Update the syncDrawingToDatabase function
+    const syncDrawingToDatabase = async (drawingData) => {
+        if (!roomCode || !userId) return;
+        
+        try {
+        const roomRef = ref(db, `rooms/${roomCode}/drawingData`);
+        const newDrawingRef = push(roomRef);
+        await update(newDrawingRef, {
+            ...drawingData,
+            userId: userId,
+            timestamp: Date.now() // Use client timestamp for immediate sorting
+        });
+        } catch (error) {
+        console.error('Error syncing drawing:', error);
+        }
+    };
+
+    // Add a useEffect to listen for drawing updates from Realtime Database
+    useEffect(() => {
+        if (!roomCode) return;
+
+        // Track participants
+        const participantsRef = ref(db, `rooms/${roomCode}/participants`);
+        const participantsListener = onValue(participantsRef, (snapshot) => {
+            const participantsData = snapshot.val() || {};
+            setParticipants(participantsData);
+        });
+        
+        // Listen for drawing updates
+        const drawingRef = ref(db, `rooms/${roomCode}/drawingData`);
+        const drawingListener = onValue(drawingRef, (snapshot) => {
+            const drawingData = snapshot.val();
+            
+            // Clear canvas first
+            const canvas = canvasRef.current;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Sort drawing data by timestamp before replaying
+            if (drawingData) {
+                const sortedDrawings = Object.values(drawingData)
+                .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+                
+                sortedDrawings.forEach(data => {
+                ctx.beginPath();
+                ctx.moveTo(data.startX, data.startY);
+                ctx.lineTo(data.endX, data.endY);
+                ctx.strokeStyle = data.color;
+                ctx.lineWidth = data.lineWidth;
+                ctx.stroke();
+                });
+            }
+        });
+
+        return () => {
+            participantsListener();
+            drawingListener();
+        };
+    }, [roomCode]);
 
     // Check if hand is making a fist (for erasing)
     const isHandClosed = (landmarks) => {
@@ -79,7 +149,7 @@ function WhiteBoard({ handData }) {
     };
 
     // Draw the pointer with different states
-    const drawPointer = (x, y, mode) => {
+    const drawPointer = (x, y, mode, participantId = null) => {
         const pointerCanvas = pointerCanvasRef.current;
         const ctx = pointerCanvas.getContext('2d');
         
@@ -127,6 +197,33 @@ function WhiteBoard({ handData }) {
         ctx.moveTo(x, y - crosshairSize);
         ctx.lineTo(x, y + crosshairSize);
         ctx.stroke();
+
+        // Draw participant label with background
+        if (participantId !== null) {
+            const label = `P${participantId}`;
+            ctx.font = '14px Arial';
+            
+            // Measure text for background
+            const metrics = ctx.measureText(label);
+            const padding = 4;
+            const bgWidth = metrics.width + (padding * 2);
+            const bgHeight = 20;
+            
+            // Draw background rectangle
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.fillRect(
+                x + radius + 5,
+                y - bgHeight/2,
+                bgWidth,
+                bgHeight
+            );
+            
+            // Draw text
+            ctx.fillStyle = strokeStyle;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(label, x + radius + 5 + padding, y);
+        }
     };
 
     // Convert hex color to RGB for transparency
@@ -164,8 +261,9 @@ function WhiteBoard({ handData }) {
         else if (pointing) pointerMode = 'draw';
         else if (peace) pointerMode = 'move';
 
-        // Always draw pointer with appropriate mode
-        drawPointer(x, y, pointerMode);
+        // Always draw pointer with appropriate mode and participant ID
+        const participantIndex = Object.keys(participants).indexOf(userId) + 1;
+        drawPointer(x, y, pointerMode, participantIndex);
 
         if (peace) {
             setLastPosition(null);
@@ -194,17 +292,34 @@ function WhiteBoard({ handData }) {
                 
                 ctx.lineTo(x, y);
                 ctx.stroke();
+
+                // Sync drawing to Realtime Database
+                const drawingData = {
+                    startX: lastPosition.x,
+                    startY: lastPosition.y,
+                    endX: x,
+                    endY: y,
+                    color: fist ? '#FFFFFF' : color,
+                    lineWidth: fist ? 20 : lineWidth
+                };
+                syncDrawingToDatabase(drawingData);
             }
         }
 
         setLastPosition({ x, y });
-    }, [handData, color, lineWidth, isDrawing]);
+    }, [handData, color, lineWidth, isDrawing, roomCode, userId, participants]);
 
-    // Clear canvas
-    const clearCanvas = () => {
+    // Clear canvas and sync clear to Realtime Database
+    const clearCanvas = async () => {
         const canvas = canvasRef.current;
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Clear drawing data in Realtime Database
+        if (roomCode) {
+            const roomRef = ref(db, `rooms/${roomCode}/drawingData`);
+            await update(roomRef, null);
+        }
     };
 
     return (
